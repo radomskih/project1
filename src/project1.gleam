@@ -9,8 +9,9 @@ import gleam/otp/supervision.{ChildSpecification, Temporary, Worker}
 import gleam/string
 
 pub fn main() {
-  let n = 100
+  let n = 10_000
   let m = 2
+  let sp = 100
 
   let assert Ok(_supervisor_actor) =
     actor.new(Nil)
@@ -21,7 +22,7 @@ pub fn main() {
 
   let builder =
     static_supervisor.new(static_supervisor.OneForOne)
-    |> add_workers(n, m, subject)
+    |> add_workers(n, m, sp, subject)
 
   let assert Ok(_supervisor) = static_supervisor.start(builder)
   //io.println("supervisor started " <> int.to_string(n) <> " workers.")
@@ -49,8 +50,9 @@ fn worker_handle_message(
         state.start,
         state.len,
         state.supervisor_data,
-        state.start - 5,
+        state.start - state.sub_problems,
       )
+      actor.stop()
     }
   }
   actor.continue(state)
@@ -115,6 +117,7 @@ pub type WorkerState {
   WorkerState(
     start: Int,
     len: Int,
+    sub_problems: Int,
     supervisor_data: Subject(MessageToSupervisor),
   )
 }
@@ -123,12 +126,13 @@ fn add_workers(
   builder: static_supervisor.Builder,
   n: Int,
   len: Int,
+  sub_problems: Int,
   supervisor_data: Subject(MessageToSupervisor),
 ) -> static_supervisor.Builder {
   case n <= 0 {
     True -> builder
     False -> {
-      let initial_state = WorkerState(n, len, supervisor_data)
+      let initial_state = WorkerState(n, len, sub_problems, supervisor_data)
       //io.println("creating worker with start: " <> int.to_string(n))
 
       let assert Ok(worker) =
@@ -147,7 +151,7 @@ fn add_workers(
         )
 
       let builder = static_supervisor.add(builder, child_spec)
-      add_workers(builder, n - 5, len, supervisor_data)
+      add_workers(builder, n - sub_problems, len, sub_problems, supervisor_data)
     }
   }
 }
@@ -158,7 +162,7 @@ fn do_calculations(
   supervisor: Subject(MessageToSupervisor),
   end: Int,
 ) {
-  case start >= end {
+  case start > end {
     True -> {
       case start > 0 {
         True -> {
