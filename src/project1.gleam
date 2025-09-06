@@ -2,16 +2,17 @@ import gleam/erlang/process.{type Subject, new_subject, receive, send}
 import gleam/float
 import gleam/int
 import gleam/io
+import gleam/list
 import gleam/otp/actor
 import gleam/otp/static_supervisor
-import gleam/otp/supervision.{ChildSpecification, Permanent, Worker}
-import gleam/result
+import gleam/otp/supervision.{ChildSpecification, Temporary, Worker}
+import gleam/string
 
 pub fn main() {
-  let n = 5
-  let m = 2
+  let n = 100
+  let m = 24
 
-  let assert Ok(supervisor_actor) =
+  let assert Ok(_supervisor_actor) =
     actor.new(Nil)
     |> actor.on_message(supervisor_handle_message)
     |> actor.start
@@ -23,7 +24,11 @@ pub fn main() {
     |> add_workers(n, m, subject)
 
   let assert Ok(_supervisor) = static_supervisor.start(builder)
-  io.println("supervisor started " <> int.to_string(n) <> " workers.")
+  //io.println("supervisor started " <> int.to_string(n) <> " workers.")
+
+  let list = supervisor_loop(subject, [])
+  let list_string = list.map(list, int.to_string) |> string.join(", ")
+  io.println(list_string)
 }
 
 pub type MessageToSupervisor {
@@ -34,7 +39,7 @@ fn worker_handle_message(
   state: WorkerState,
   _message: Nil,
 ) -> actor.Next(WorkerState, Nil) {
-  io.println("worker testing...")
+  //io.println("worker testing...")
   let start = state.start
   let len = state.len
   let supervisor = state.supervisor_data
@@ -45,6 +50,24 @@ fn worker_handle_message(
   send(supervisor, Result(start, perfect))
 
   actor.continue(state)
+}
+
+fn supervisor_loop(
+  subject: Subject(MessageToSupervisor),
+  perfect_squares: List(Int),
+) {
+  case receive(subject, 100) {
+    Ok(Result(start, True)) -> {
+      let updated_list = list.append([start], perfect_squares)
+      supervisor_loop(subject, updated_list)
+    }
+    Ok(Result(_start, False)) -> {
+      supervisor_loop(subject, perfect_squares)
+    }
+    Error(_) -> {
+      perfect_squares
+    }
+  }
 }
 
 fn supervisor_handle_message(
@@ -89,9 +112,6 @@ pub type WorkerState {
   )
 }
 
-pub type ActorRef(a) =
-  actor.Started(a)
-
 fn add_workers(
   builder: static_supervisor.Builder,
   n: Int,
@@ -102,6 +122,7 @@ fn add_workers(
     True -> builder
     False -> {
       let initial_state = WorkerState(n, len, supervisor_data)
+      //io.println("creating worker with start: " <> int.to_string(n))
 
       let assert Ok(worker) =
         actor.new(initial_state)
@@ -110,8 +131,20 @@ fn add_workers(
 
       let child_spec =
         ChildSpecification(
-          start: fn() { Ok(worker) },
-          restart: Permanent,
+          start: fn() {
+            //io.println("worker testing..." <> int.to_string(n))
+            let start = initial_state.start
+            let len = initial_state.len
+            let supervisor = initial_state.supervisor_data
+
+            let sum = sum_consecutive_squares(start, len)
+            let perfect = is_perfect_square(sum)
+
+            send(supervisor, Result(start, perfect))
+
+            Ok(worker)
+          },
+          restart: Temporary,
           significant: False,
           child_type: Worker(5000),
         )
