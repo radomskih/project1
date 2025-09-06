@@ -10,11 +10,11 @@ import gleam/string
 
 pub fn main() {
   let n = 100
-  let m = 24
+  let m = 2
 
   let assert Ok(_supervisor_actor) =
     actor.new(Nil)
-    |> actor.on_message(supervisor_handle_message)
+    //|> actor.on_message(supervisor_handle_message)
     |> actor.start
 
   let subject: Subject(MessageToSupervisor) = new_subject()
@@ -27,7 +27,7 @@ pub fn main() {
   //io.println("supervisor started " <> int.to_string(n) <> " workers.")
 
   let list = supervisor_loop(subject, [])
-  let list_string = list.map(list, int.to_string) |> string.join(", ")
+  let list_string = list.map(list, int.to_string) |> string.join("\n")
   io.println(list_string)
 }
 
@@ -35,20 +35,24 @@ pub type MessageToSupervisor {
   Result(start: Int, is_perfect: Bool)
 }
 
+pub type MessageToWorker {
+  Start
+}
+
 fn worker_handle_message(
   state: WorkerState,
-  _message: Nil,
-) -> actor.Next(WorkerState, Nil) {
-  //io.println("worker testing...")
-  let start = state.start
-  let len = state.len
-  let supervisor = state.supervisor_data
-
-  let sum = sum_consecutive_squares(start, len)
-  let perfect = is_perfect_square(sum)
-
-  send(supervisor, Result(start, perfect))
-
+  message: MessageToWorker,
+) -> actor.Next(WorkerState, MessageToWorker) {
+  case message {
+    Start -> {
+      do_calculations(
+        state.start,
+        state.len,
+        state.supervisor_data,
+        state.start - 5,
+      )
+    }
+  }
   actor.continue(state)
 }
 
@@ -70,20 +74,20 @@ fn supervisor_loop(
   }
 }
 
-fn supervisor_handle_message(
-  _state: Nil,
-  message: MessageToSupervisor,
-) -> actor.Next(Nil, MessageToSupervisor) {
-  case message {
-    Result(_start, True) -> {
-      io.println("Perfect square")
-    }
-    Result(_start, False) -> {
-      io.println("Not a perfect square")
-    }
-  }
-  actor.continue(Nil)
-}
+//fn supervisor_handle_message(
+//_state: Nil,
+//message: MessageToSupervisor,
+//) -> actor.Next(Nil, MessageToSupervisor) {
+//case message {
+//Result(_start, True) -> {
+//io.println("Perfect square")
+//}
+//Result(_start, False) -> {
+//io.println("Not a perfect square")
+//}
+//}
+//actor.continue(Nil)
+//}
 
 fn sum_squares_up_to(n: Int) -> Int {
   { n * { n + 1 } * { 2 * n + 1 } } / 6
@@ -97,10 +101,13 @@ fn sum_consecutive_squares(start: Int, len: Int) -> Int {
 fn is_perfect_square(n: Int) -> Bool {
   let sq_root = float.square_root(int.to_float(n))
   case sq_root {
-    Ok(root) -> {
-      int.to_float(float.round(root)) == root
+    Ok(sq_root) -> {
+      //io.println(int.to_string(n) <> " " <> float.to_string(sq_root))
+      int.to_float(float.round(sq_root)) == sq_root
     }
-    Error(_) -> False
+    Error(_) -> {
+      False
+    }
   }
 }
 
@@ -128,28 +135,47 @@ fn add_workers(
         actor.new(initial_state)
         |> actor.on_message(worker_handle_message)
         |> actor.start
+      let subject = worker.data
+      send(subject, Start)
 
       let child_spec =
         ChildSpecification(
-          start: fn() {
-            //io.println("worker testing..." <> int.to_string(n))
-            let start = initial_state.start
-            let len = initial_state.len
-            let supervisor = initial_state.supervisor_data
-
-            let sum = sum_consecutive_squares(start, len)
-            let perfect = is_perfect_square(sum)
-
-            send(supervisor, Result(start, perfect))
-
-            Ok(worker)
-          },
+          start: fn() { Ok(worker) },
           restart: Temporary,
           significant: False,
           child_type: Worker(5000),
         )
+
       let builder = static_supervisor.add(builder, child_spec)
-      add_workers(builder, n - 1, len, supervisor_data)
+      add_workers(builder, n - 5, len, supervisor_data)
+    }
+  }
+}
+
+fn do_calculations(
+  start: Int,
+  len: Int,
+  supervisor: Subject(MessageToSupervisor),
+  end: Int,
+) {
+  case start >= end {
+    True -> {
+      case start > 0 {
+        True -> {
+          let sum = sum_consecutive_squares(start, len)
+          let perfect = is_perfect_square(sum)
+
+          //echo "doing calculations for " <> int.to_string(start)
+          send(supervisor, Result(start, perfect))
+          do_calculations(start - 1, len, supervisor, end)
+        }
+        False -> {
+          Nil
+        }
+      }
+    }
+    False -> {
+      Nil
     }
   }
 }
