@@ -42,7 +42,7 @@ Result:
 990.375s/0.9325s = 1,062
 
 # Largest Problem Solved
-project1 116704645 4 with unit size at 10_000
+project1 116_704_645 4 with unit size at 10_000
 Run Time: 23.31s
 CPU Time: 990.4s
 
