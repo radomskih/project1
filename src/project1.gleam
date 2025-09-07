@@ -7,14 +7,20 @@ import gleam/otp/actor
 import gleam/otp/static_supervisor
 import gleam/otp/supervision.{ChildSpecification, Temporary, Worker}
 import gleam/string
+import gleam/time/duration
+import gleam/time/timestamp
 
 pub fn main() {
-  let n = 10_000
+  let time_start = timestamp.system_time()
+
+  let n = 1_000_000
   let m = 2
-  let sp = 100
+  let sp = 1000
+  let num_actors =
+    float.round(float.ceiling(int.to_float(n) /. int.to_float(sp)))
 
   let assert Ok(_supervisor_actor) =
-    actor.new(Nil)
+    actor.new(0)
     //|> actor.on_message(supervisor_handle_message)
     |> actor.start
 
@@ -22,18 +28,25 @@ pub fn main() {
 
   let builder =
     static_supervisor.new(static_supervisor.OneForOne)
+    |> static_supervisor.auto_shutdown(static_supervisor.AllSignificant)
     |> add_workers(n, m, sp, subject)
 
   let assert Ok(_supervisor) = static_supervisor.start(builder)
-  //io.println("supervisor started " <> int.to_string(n) <> " workers.")
 
-  let list = supervisor_loop(subject, [])
-  let list_string = list.map(list, int.to_string) |> string.join("\n")
-  io.println(list_string)
+  supervisor_loop(subject, SupervisorState([], num_actors))
+
+  let time_end = timestamp.system_time()
+
+  let run_time = timestamp.difference(time_start, time_end)
+  let t = duration.to_seconds(run_time)
+  io.println("total subproblems: " <> int.to_string(n))
+  io.print("subproblems per worker: " <> int.to_string(sp) <> "\n")
+  io.println("number of workers: " <> int.to_string(num_actors))
+  io.println("Overall run time: " <> float.to_string(t))
 }
 
 pub type MessageToSupervisor {
-  Result(start: Int, is_perfect: Bool)
+  Result(results: List(Int))
 }
 
 pub type MessageToWorker {
@@ -46,49 +59,72 @@ fn worker_handle_message(
 ) -> actor.Next(WorkerState, MessageToWorker) {
   case message {
     Start -> {
-      do_calculations(
-        state.start,
-        state.len,
-        state.supervisor_data,
-        state.start - state.sub_problems,
-      )
+      let results =
+        do_calculations(
+          state.start,
+          state.len,
+          state.start - state.sub_problems,
+          [],
+        )
+      send(state.supervisor_data, Result(results))
+      //io.print(
+      //"worker " <> int.to_string(state.start) <> " all done! shutting down",
+      //)
       actor.stop()
     }
   }
-  actor.continue(state)
 }
 
 fn supervisor_loop(
   subject: Subject(MessageToSupervisor),
-  perfect_squares: List(Int),
+  state: SupervisorState,
 ) {
-  case receive(subject, 100) {
-    Ok(Result(start, True)) -> {
-      let updated_list = list.append([start], perfect_squares)
-      supervisor_loop(subject, updated_list)
-    }
-    Ok(Result(_start, False)) -> {
-      supervisor_loop(subject, perfect_squares)
+  case receive(subject, 1000) {
+    Ok(Result(results)) -> {
+      let updated_list = list.append(results, state.results)
+      let updated_num = state.num_left - 1
+      let new_state = SupervisorState(updated_list, updated_num)
+      case updated_num == 0 {
+        True -> {
+          let list_string =
+            list.map(updated_list, int.to_string) |> string.join("\n")
+          io.println(list_string)
+          actor.stop()
+        }
+        False -> {
+          supervisor_loop(subject, new_state)
+        }
+      }
     }
     Error(_) -> {
-      perfect_squares
+      supervisor_loop(subject, state)
     }
   }
 }
 
 //fn supervisor_handle_message(
-//_state: Nil,
+//state: SupervisorState,
 //message: MessageToSupervisor,
-//) -> actor.Next(Nil, MessageToSupervisor) {
+//) -> actor.Next(SupervisorState, MessageToSupervisor) {
 //case message {
-//Result(_start, True) -> {
-//io.println("Perfect square")
+//Result(results) -> {
+//io.println("got results")
+//let updated_list = list.append(results, state.results)
+//let updated_num = state.num_left - 1
+//let new_state = SupervisorState(updated_list, updated_num)
+//case updated_num == 0 {
+//True -> {
+//let list_string =
+//list.map(updated_list, int.to_string) |> string.join("\n")
+//io.println(list_string)
+//actor.stop()
 //}
-//Result(_start, False) -> {
-//io.println("Not a perfect square")
+//False -> {
+//actor.continue(new_state)
 //}
 //}
-//actor.continue(Nil)
+//}
+//}
 //}
 
 fn sum_squares_up_to(n: Int) -> Int {
@@ -122,6 +158,10 @@ pub type WorkerState {
   )
 }
 
+pub type SupervisorState {
+  SupervisorState(results: List(Int), num_left: Int)
+}
+
 fn add_workers(
   builder: static_supervisor.Builder,
   n: Int,
@@ -146,7 +186,7 @@ fn add_workers(
         ChildSpecification(
           start: fn() { Ok(worker) },
           restart: Temporary,
-          significant: False,
+          significant: True,
           child_type: Worker(5000),
         )
 
@@ -159,9 +199,9 @@ fn add_workers(
 fn do_calculations(
   start: Int,
   len: Int,
-  supervisor: Subject(MessageToSupervisor),
   end: Int,
-) {
+  results: List(Int),
+) -> List(Int) {
   case start > end {
     True -> {
       case start > 0 {
@@ -169,17 +209,23 @@ fn do_calculations(
           let sum = sum_consecutive_squares(start, len)
           let perfect = is_perfect_square(sum)
 
-          //echo "doing calculations for " <> int.to_string(start)
-          send(supervisor, Result(start, perfect))
-          do_calculations(start - 1, len, supervisor, end)
+          case perfect {
+            True -> {
+              let updated_results = list.append(results, [start])
+              do_calculations(start - 1, len, end, updated_results)
+            }
+            False -> {
+              do_calculations(start - 1, len, end, results)
+            }
+          }
         }
         False -> {
-          Nil
+          results
         }
       }
     }
     False -> {
-      Nil
+      results
     }
   }
 }
