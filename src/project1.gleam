@@ -52,11 +52,12 @@ pub fn main() {
       let time_end = timestamp.system_time()
 
       let run_time = timestamp.difference(time_start, time_end)
-      let t = duration.to_seconds(run_time)
-      io.println("total subproblems: " <> int.to_string(n))
-      io.print("subproblems per worker: " <> int.to_string(sp) <> "\n")
-      io.println("number of workers: " <> int.to_string(num_actors))
-      io.println("Overall run time: " <> float.to_string(t))
+      let _t = duration.to_seconds(run_time)
+      //io.println("total subproblems: " <> int.to_string(n))
+      //io.print("subproblems per worker: " <> int.to_string(sp) <> "\n")
+      //io.println("number of workers: " <> int.to_string(num_actors))
+      //io.println("Overall run time: " <> float.to_string(t))
+      Nil
     }
   }
 }
